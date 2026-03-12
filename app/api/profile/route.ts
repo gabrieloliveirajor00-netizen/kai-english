@@ -113,11 +113,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Profile API error:", error);
-    return NextResponse.json(
-      { error: "Failed to generate profile" },
-      { status: 500 }
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Profile API error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

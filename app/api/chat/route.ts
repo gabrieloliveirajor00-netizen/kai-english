@@ -72,10 +72,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ reply });
   } catch (error) {
-    console.error("Chat API error:", error);
-    return NextResponse.json(
-      { error: "Failed to get response" },
-      { status: 500 }
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Chat API error:", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
