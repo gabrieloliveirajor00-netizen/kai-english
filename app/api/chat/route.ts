@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { NextRequest, NextResponse } from "next/server";
 
 const SYSTEM_PROMPT = `Você é o Kai, um parceiro de aprendizado de inglês com personalidade cool e direta. Não é professor — é mais como aquele amigo que fala inglês fluente e quer te ajudar de verdade.
@@ -39,37 +39,33 @@ export async function POST(req: NextRequest) {
       isLastTurn: boolean;
     };
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: SYSTEM_PROMPT,
-    });
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    // Build Gemini history from all messages except the last (current user msg)
-    const rawHistory = messages.slice(0, -1).map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+    const formattedMessages = messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
     }));
 
-    // Gemini requires history to start with role "user"
-    const history =
-      rawHistory.length > 0 && rawHistory[0].role === "model"
-        ? [{ role: "user", parts: [{ text: "oi" }] }, ...rawHistory]
-        : rawHistory;
-
-    const chat = model.startChat({ history });
-
-    const lastMessage = messages[messages.length - 1];
-    let userText = lastMessage.content;
-
-    if (isLastTurn) {
-      userText +=
-        "\n\n[contexto interno: esta é a última troca antes de encerrar. Conclua a conversa de forma calorosa e natural, sem fazer mais perguntas — diga que vai criar o perfil agora.]";
+    // Append context hint on last turn
+    if (isLastTurn && formattedMessages.length > 0) {
+      const last = formattedMessages[formattedMessages.length - 1];
+      formattedMessages[formattedMessages.length - 1] = {
+        ...last,
+        content: last.content + "\n\n[contexto interno: esta é a última troca antes de encerrar. Conclua a conversa de forma calorosa e natural, sem fazer mais perguntas — diga que vai criar o perfil agora.]",
+      };
     }
 
-    const result = await chat.sendMessage(userText);
-    const reply = result.response.text();
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...formattedMessages,
+      ],
+      max_tokens: 256,
+      temperature: 0.8,
+    });
 
+    const reply = completion.choices[0]?.message?.content ?? "";
     return NextResponse.json({ reply });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

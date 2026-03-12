@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import { google } from "googleapis";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -11,22 +11,6 @@ TOM E ESTILO:
 - Pode usar gírias leves mas sem forçar
 - Máximo 3 linhas por resposta
 - UMA pergunta por vez, sempre
-
-PERGUNTAS QUE DEVE COBRIR ao longo da conversa (de forma orgânica, nunca como lista):
-1. Nome
-2. Idade / faixa etária
-3. O que faz no dia a dia
-4. Hobbies e horas livres
-5. Séries ou filmes favoritos
-6. Músicas / artistas que gosta
-7. Redes sociais que usa
-8. Algum nicho específico (games, moda, culinária, esportes, k-pop...)
-9. Como se sente com o inglês hoje
-10. Já tentou aprender antes?
-11. Por que quer aprender agora
-12. Como imagina usando o inglês no futuro
-13. Quanto tempo por dia consegue dedicar
-14. Prefere aprender ouvindo, lendo ou conversando
 
 ENCERRAMENTO (quando receber [GERAR_PERFIL]):
 Gere APENAS JSON válido, sem texto, sem markdown, sem backticks. Objeto puro:
@@ -65,7 +49,6 @@ Gere APENAS JSON válido, sem texto, sem markdown, sem backticks. Objeto puro:
 }`;
 
 type RawMessage = { role: string; content: string };
-
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Profile = Record<string, any>;
 
@@ -73,42 +56,39 @@ export async function POST(req: NextRequest) {
   try {
     const { messages } = await req.json() as { messages: RawMessage[] };
 
-    // ── 1. Generate profile JSON via Gemini ──────────────────────────────────
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
-      systemInstruction: SYSTEM_PROMPT,
-    });
+    // ── 1. Generate profile JSON via Groq ─────────────────────────────────────
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-    // Full conversation becomes history; [GERAR_PERFIL] is the trigger message
-    const rawHistory = messages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
+    const formattedMessages = messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
     }));
 
-    // Gemini requires history to start with role "user"
-    const history =
-      rawHistory.length > 0 && rawHistory[0].role === "model"
-        ? [{ role: "user", parts: [{ text: "oi" }] }, ...rawHistory]
-        : rawHistory;
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        ...formattedMessages,
+        { role: "user", content: "[GERAR_PERFIL]" },
+      ],
+      max_tokens: 1024,
+      temperature: 0.3,
+    });
 
-    const chat = model.startChat({ history });
-    const result = await chat.sendMessage("[GERAR_PERFIL]");
-    let jsonText = result.response.text().trim();
+    let jsonText = (completion.choices[0]?.message?.content ?? "").trim();
 
-    // Strip markdown code fences if Gemini wraps the output
+    // Strip markdown code fences if model wraps the output
     const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenceMatch) {
       jsonText = fenceMatch[1].trim();
     } else {
-      // Fallback: extract raw JSON object
       const objMatch = jsonText.match(/\{[\s\S]*\}/);
       if (objMatch) jsonText = objMatch[0];
     }
 
     const profile: Profile = JSON.parse(jsonText);
 
-    // ── 2. Save to Google Sheets ─────────────────────────────────────────────
+    // ── 2. Save to Google Sheets ──────────────────────────────────────────────
     await saveToSheets(profile);
 
     return NextResponse.json({ success: true });
