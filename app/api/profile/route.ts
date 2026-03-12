@@ -1,16 +1,8 @@
 import Groq from "groq-sdk";
-import { google } from "googleapis";
+import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
 
 const SYSTEM_PROMPT = `Você é o Kai, um parceiro de aprendizado de inglês com personalidade cool e direta. Não é professor — é mais como aquele amigo que fala inglês fluente e quer te ajudar de verdade.
-
-TOM E ESTILO:
-- Português brasileiro, conversa natural, sem formalismos
-- Frases curtas. Sem floreios. Sem "Que incrível!!!" exagerado
-- Reações genuínas mas contidas: "sério?" "faz sentido" "legal isso"
-- Pode usar gírias leves mas sem forçar
-- Máximo 3 linhas por resposta
-- UMA pergunta por vez, sempre
 
 ENCERRAMENTO (quando receber [GERAR_PERFIL]):
 Gere APENAS JSON válido, sem texto, sem markdown, sem backticks. Objeto puro:
@@ -72,7 +64,7 @@ export async function POST(req: NextRequest) {
         { role: "user", content: "[GERAR_PERFIL]" },
       ],
       max_tokens: 1024,
-      temperature: 0.3,
+      temperature: 0.2,
     });
 
     let jsonText = (completion.choices[0]?.message?.content ?? "").trim();
@@ -88,8 +80,8 @@ export async function POST(req: NextRequest) {
 
     const profile: Profile = JSON.parse(jsonText);
 
-    // ── 2. Save to Google Sheets ──────────────────────────────────────────────
-    await saveToSheets(profile);
+    // ── 2. Save to Supabase ───────────────────────────────────────────────────
+    await saveToSupabase(profile);
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -99,33 +91,19 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function saveToSheets(profile: Profile) {
-  const privateKey = (process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ?? "")
-    .replace(/\\n/g, "\n");
+async function saveToSupabase(profile: Profile) {
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
 
-  const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: privateKey,
-    },
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  const { error } = await supabase.from("profiles").insert({
+    nome: String(profile.nome ?? ""),
+    idade_aproximada: String(profile.idade_aproximada ?? ""),
+    ocupacao: String(profile.ocupacao ?? ""),
+    estilo_preferido: String(profile.estilo_preferido ?? ""),
+    perfil_json: profile,
   });
 
-  const sheets = google.sheets({ version: "v4", auth });
-
-  const timestamp = new Date().toISOString();
-  const nome = String(profile.nome ?? "");
-  const idade = String(profile.idade_aproximada ?? "");
-  const ocupacao = String(profile.ocupacao ?? "");
-  const estilo = String(profile.estilo_preferido ?? "");
-  const jsonStr = JSON.stringify(profile);
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: process.env.GOOGLE_SHEETS_ID,
-    range: "Sheet1!A:F",
-    valueInputOption: "RAW",
-    requestBody: {
-      values: [[timestamp, nome, idade, ocupacao, estilo, jsonStr]],
-    },
-  });
+  if (error) throw new Error(`Supabase error: ${error.message}`);
 }

@@ -46,12 +46,12 @@ export async function POST(req: NextRequest) {
       content: m.content,
     }));
 
-    // Append context hint on last turn
+    // Append closing instruction on last turn — explicitly forbid JSON generation
     if (isLastTurn && formattedMessages.length > 0) {
       const last = formattedMessages[formattedMessages.length - 1];
       formattedMessages[formattedMessages.length - 1] = {
         ...last,
-        content: last.content + "\n\n[contexto interno: esta é a última troca antes de encerrar. Conclua a conversa de forma calorosa e natural, sem fazer mais perguntas — diga que vai criar o perfil agora.]",
+        content: last.content + "\n\n[INSTRUÇÃO INTERNA — NÃO EXIBIR: último turno da conversa. Responda à mensagem acima de forma curta e calorosa, diga que com essas informações já dá pra montar o perfil. PROIBIDO gerar JSON. PROIBIDO fazer mais perguntas. Máximo 2 frases.]",
       };
     }
 
